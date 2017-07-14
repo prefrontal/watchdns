@@ -1,9 +1,9 @@
 #!/bin/sh
-LISTEN_PORT=$1
+IFS=';' read -ra LISTEN_PORTS <<< "$1"
 RESOLVE_NAME=$2
 CONNECT_PORT=$3
 if [ -z "$CONNECT_PORT" ]; then
-    echo "Syntax: $0 <LISTEN_PORT> <RESOLVE_NAME> <CONNECT_PORT>"
+    echo "Syntax: $0 <LISTEN_PORTS> <RESOLVE_NAME> <CONNECT_PORT>"
     exit 1
 fi
 
@@ -13,10 +13,19 @@ config () {
     # If the first parameter contains a semi-colon,
     # assume that it's addr:port. Otherwise, assume
     # that it's just a port number and put * in front.
-    case "$1" in
-        *:*) BIND="$1" ;;
-        *) BIND="*:$1" ;;
-    esac
+    BIND=""
+    last_pos=$(( ${#LISTEN_PORTS[*]} - 1 ))
+    last_location=${LISTEN_PORTS[$last_pos]}
+    for location in "${LISTEN_PORTS[@]}"
+    do
+        case "$location" in
+            *:*) BIND+="  bind ${location}" ;;
+            *) BIND+="  bind *:${location}" ;;
+        esac
+        if [ "$location" != "$last_location" ]; then
+            BIND+=$'\n'
+        fi
+    done
 
     # Generate the global section of the config file.
     cat <<EOF
@@ -31,7 +40,7 @@ defaults
   timeout server 50000ms
 
 frontend hamba-in
-  bind $BIND
+$BIND
   default_backend hamba-out
 
 backend hamba-out
@@ -78,6 +87,7 @@ trap stop TERM
 RECORDS=""
 
 while true; do
+    config $LISTEN_PORT
     NEW_RECORDS=$(
         drill $RESOLVE_NAME |
         awk '{ if (($1=="'$RESOLVE_NAME'.") && ($4=="A")) {print $5} }' |
