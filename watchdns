@@ -10,23 +10,6 @@ fi
 # Following section taken from hamba directly.
 # Output a valid HAProxy configuration.
 config () {
-    # If the first parameter contains a semi-colon,
-    # assume that it's addr:port. Otherwise, assume
-    # that it's just a port number and put * in front.
-    BIND=""
-    last_pos=$(( ${#LISTEN_PORTS[*]} - 1 ))
-    last_location=${LISTEN_PORTS[$last_pos]}
-    for location in "${LISTEN_PORTS[@]}"
-    do
-        case "$location" in
-            *:*) BIND+="  bind ${location}" ;;
-            *) BIND+="  bind *:${location}" ;;
-        esac
-        if [ "$location" != "$last_location" ]; then
-            BIND+=$'\n'
-        fi
-    done
-
     # Generate the global section of the config file.
     cat <<EOF
 global
@@ -38,10 +21,23 @@ defaults
   timeout connect 5000ms
   timeout client 50000ms
   timeout server 50000ms
+EOF
+
+    # Generate frontends
+    last_pos=$(( ${#LISTEN_PORTS[*]} - 1 ))
+    last_location=${LISTEN_PORTS[$last_pos]}
+    for location in "${LISTEN_PORTS[@]}"
+    do
+        cat <<EOF
 
 frontend hamba-in
-$BIND
+  bind $location
   default_backend hamba-out
+EOF
+    done
+
+    # add backend header
+    cat <<EOF
 
 backend hamba-out
 EOF
