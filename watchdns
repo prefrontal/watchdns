@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 IFS=';' read -ra LISTEN_PORTS <<< "$1"
 RESOLVE_NAME=$2
 CONNECT_PORT=$3
