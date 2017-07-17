@@ -1,5 +1,5 @@
 #!/bin/bash
-IFS=';' read -ra LISTEN_PORTS <<< "$1"
+LISTEN_PORTS=$1
 RESOLVE_NAME=$2
 CONNECT_PORT=$3
 if [ -z "$CONNECT_PORT" ]; then
@@ -10,36 +10,38 @@ fi
 # Following section taken from hamba directly.
 # Output a valid HAProxy configuration.
 config () {
+    BIND=""
+    IFS=';' read -ra locations <<< "$1"
+    last_pos=$(( ${#locations[*]} - 1 ))
+    last_location=${locations[$last_pos]}
+    for location in "${locations[@]}"
+    do
+        case "$location" in
+            *:*) BIND+="  bind ${location}" ;;
+            *) BIND+="  bind *:${location}" ;;
+        esac
+        if [ "$location" != "$last_location" ]; then
+            BIND+=$'\n'
+        fi
+    done
     # Generate the global section of the config file.
     cat <<EOF
 global
   daemon
-  maxconn 256
+  maxconn 1024
 
 defaults
   mode tcp
-  timeout connect 5000ms
+  timeout connect 10000ms
   timeout client 50000ms
   timeout server 50000ms
-EOF
-
-    # Generate frontends
-    last_pos=$(( ${#LISTEN_PORTS[*]} - 1 ))
-    last_location=${LISTEN_PORTS[$last_pos]}
-    for location in "${LISTEN_PORTS[@]}"
-    do
-        cat <<EOF
 
 frontend hamba-in
-  bind $location
+$BIND
   default_backend hamba-out
-EOF
-    done
-
-    # add backend header
-    cat <<EOF
 
 backend hamba-out
+  balance leastconn
 EOF
 
     # Now generate all the backend entries.
@@ -48,15 +50,18 @@ EOF
     # assume that it's addr:port. Otherwise,
     # assume that the backend address and port
     # are given by two separate parameters.
-    for location in "${LISTEN_PORTS[@]}"
-    do
-        case "$location" in
+    while [ "$1" ]; do
+        # If the backend contains a semi-colon,
+        # assume that it's addr:port. Otherwise,
+        # assume that the backend address and port
+        # are given by two separate parameters.
+        case "$1" in
         *:*)
-            echo "  server $(echo ${location} | tr : -) $location maxconn 32 check"
+            echo "  server $(echo $1 | tr : -) $1 maxconn 32 check"
             shift
             ;;
         *)
-            echo "  server ${location}-$2 $location:$2 maxconn 32 check"
+            echo "  server $1-$2 $1:$2 maxconn 32 check"
             shift
             shift
             ;;
@@ -84,7 +89,6 @@ trap stop TERM
 RECORDS=""
 
 while true; do
-    config $LISTEN_PORTS
     NEW_RECORDS=$(
         drill $RESOLVE_NAME |
         awk '{ if (($1=="'$RESOLVE_NAME'.") && ($4=="A")) {print $5} }' |
@@ -97,6 +101,9 @@ while true; do
     fi
     echo "$RESOLVE_NAME changed from [ $RECORDS] to [ $NEW_RECORDS]"
     RECORDS="$NEW_RECORDS"
+    config $LISTEN_PORTS $(for RECORD in $RECORDS; do 
+                            echo $RECORD $CONNECT_PORT
+                          done)
     config $LISTEN_PORTS $(for RECORD in $RECORDS; do 
                             echo $RECORD $CONNECT_PORT
                           done) >~/haproxy.tmp
